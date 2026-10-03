@@ -245,13 +245,13 @@ $runtime = [ordered]@{
     back            = $cfg.back
     menu            = $cfg.menu
     aliases         = $cfg.aliases
+    input           = $cfg.input
     keys            = $cfg.keys
     inject          = [ordered]@{
         devicePixelRatio = $cfg.inject.devicePixelRatio
         userAgent        = $cfg.inject.userAgent
         userAgentData    = $cfg.inject.userAgentData
-        fixKeyEvents      = $cfg.inject.fixKeyEvents
-        spatialNavigation = $cfg.inject.spatialNavigation
+        fixKeyEvents     = $cfg.inject.fixKeyEvents
         scripts          = $scripts
     }
     debug           = $cfg.debug

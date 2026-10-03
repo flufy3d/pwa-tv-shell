@@ -52,7 +52,7 @@ Gradle 用仓库里的 wrapper（8.14.3），AGP 8.13.2，Kotlin 2.4.10。
 
 2. 运行 `./build.ps1 <名字>`。名称、图标、背景色会从网站的 `manifest.webmanifest` 里自动读取。
 3. 运行 `./install.ps1 <名字> -Run`。
-4. 加 `-DebugKeys` 启动，看看遥控器的每个键传到网页后变成了什么，再按需调整 `keys`、`menu.items`、`inject.spatialNavigation` 等字段。
+4. 加 `-DebugKeys` 启动，看看遥控器的每个键传到网页后变成了什么，再按需调整 `input`、`keys`、`menu.items` 等字段。
 
 `build.ps1` 做了这些事：
 
@@ -90,12 +90,13 @@ Gradle 用仓库里的 wrapper（8.14.3），AGP 8.13.2，Kotlin 2.4.10。
 | `menu.keys` | `["MENU", "TV_CONTENTS_MENU"]` | 短按就打开或关闭菜单的键 |
 | `menu.items` | `[]` | 菜单里的应用自定义动作，见下文 |
 | `aliases` | 见下文 | 按键归一化：先把某个键码换成另一个键码，再按换后的键处理 |
+| `input.mode` | `"focus"` | 默认输入方式：`keys` 按键、`focus` 焦点导航、`cursor` 光标，见下文 |
+| `input.modes` | `["focus", "cursor"]` | 菜单里可以切换的输入方式，少于两个就不显示切换项。用户的选择按应用记住 |
 | `keys` | `{}` | 遥控器键到网页键盘事件的映射，见下文 |
 | `inject.devicePixelRatio` | `null` | 覆盖网页读到的 `window.devicePixelRatio`，只影响网页按它算出来的渲染分辨率，CSS 布局不变 |
 | `inject.userAgent` | `null` | 覆盖 UA。`{default}` 会被替换成系统 WebView 的原始 UA，例如 `"{default} MyTV/1.0"` |
 | `inject.userAgentData` | `null` | 覆盖 `navigator.userAgentData` 的 `mobile` 和 `platform`，例如 `{"mobile": false}` |
 | `inject.fixKeyEvents` | `true` | 修复原生按键事件的 `code` 和 `repeat`，见"实测发现" |
-| `inject.spatialNavigation` | `true` | 是否保留 WebView 的空间导航（方向键在按钮之间移动焦点）。游戏类应用设为 `false` |
 | `inject.scripts` | `[]` | 自定义注入脚本，路径相对 `apps/`，在网页脚本之前、核心脚本之后运行 |
 | `debug` | `false` | 默认就打开调试叠层（一般用 `install.ps1 -DebugKeys` 临时打开） |
 | `fpsLog` | `false` | 默认就输出帧率日志（一般用 `install.ps1 -Fps` 临时打开） |
@@ -110,6 +111,22 @@ Gradle 用仓库里的 wrapper（8.14.3），AGP 8.13.2，Kotlin 2.4.10。
 - 确定键发 `ENTER` 或 `NUMPAD_ENTER` 的遥控器，WebView 和菜单按钮都能原生处理，不需要归一化
 
 实测能经 CEC 传到小米盒子的键有：方向键、确定键、BACK、CHANNEL_UP/DOWN、数字 0–9、PROG_RED/GREEN/YELLOW/BLUE。Home、菜单、设置、音量都传不过来。CEC 的长按会在大约 300ms 后发出第一次重复（带 `FLAG_LONG_PRESS`），可以识别。
+
+### 输入方式 `input`
+
+方向键和确定键怎么用，有三种方式。菜单里的"输入方式：xxx"会在 `input.modes` 里依次切换，并按应用记住：
+
+| 方式 | 方向键 | 确定键 | 适合 |
+|---|---|---|---|
+| `keys` 按键 | 只作为 ArrowLeft 等键盘事件交给网页，焦点不动 | 交给网页当 Enter | 自己支持键盘的游戏 |
+| `focus` 焦点导航 | 网页先收到；网页没处理的话，WebView 的空间导航把焦点移到上下左右最近的可点元素 | 点击焦点元素 | 按钮、链接都是标准 `<button>`/`<a>` 的网页 |
+| `cursor` 光标 | 移动屏幕上的指针（按住会加速）；推到屏幕边缘就滚动页面 | 在指针处点击；按住确定再移动就是拖动 | 只考虑了鼠标和触屏的网页，`<div onclick>` 这类焦点导航够不到的元素 |
+
+光标模式的细节：
+- 指针是叠在 WebView 上的原生 View，移动由逐帧动画驱动（按下开始、抬起停止），不依赖 CEC 每 300ms 一次的慢速重复。短按走一小步（10dp），方便精确对准；按住 220ms 后开始连续移动，并逐渐加速
+- 点击用触摸事件（兼容性最好），移动时发鼠标悬停事件，所以网页的 hover 效果也能用
+- 边缘滚动用 JS 找滚动容器：先从指针下的元素往上找能往这个方向滚的容器，找不到就用页面上可见面积最大的可滚动容器（很多内嵌滚动区不贴屏幕边缘），都没有就派发 `wheel` 事件。指针在跨域 iframe 上时改发原生滚轮事件
+- 指针闲置 5 秒后自动隐藏，按任意方向键重新出现
 
 ### 菜单项 `menu.items`
 
@@ -165,6 +182,7 @@ Gradle 用仓库里的 wrapper（8.14.3），AGP 8.13.2，Kotlin 2.4.10。
 if (window.TVShell) {
   TVShell.version;        // 套壳版本
   TVShell.app;            // 应用名（apps/<名字>.json 的名字）
+  TVShell.inputMode;      // 当前输入方式：keys / focus / cursor
   TVShell.exit();         // 退出 App
   TVShell.back();         // 执行套壳的默认返回（后退，或按 back.atRoot 处理）
   TVShell.toast('文字');  // 屏幕底部提示 2 秒
@@ -200,7 +218,7 @@ adb -s 100.108.156.33:5555 logcat -s TVShell TVShell-web
 
 - **原生方向键和确定键传进网页后 `code` 是空字符串。** WebView 根据 scanCode 推算 `code`，而 CEC 和 adb 注入的按键 scanCode=0。确定键在网页里是 `key="Enter"`、`keyCode=13`、`code=""`。`inject.fixKeyEvents` 会在 window 捕获阶段（比网页的所有监听都早）按 `key` 把 `code` 补上。事件仍然是原生的，所以确定键不需要再映射成合成的 Enter
 - **长按产生的重复 keydown 传进网页后 `repeat` 是 false。** 网页常用 `if (e.repeat) return` 过滤重复，不修的话按住上键会每 300ms 跳一次。`fixKeyEvents` 会把"没松开又按下"的事件标成 `repeat=true`
-- **没有触摸屏的设备上，WebView 默认开启空间导航。** 网页没有 preventDefault 的方向键会把焦点移到按钮上，之后再按确定键，就会"点击"这个按钮（neon-racer 因此会在开局的同时误打开成就面板）。`inject.spatialNavigation: false` 会对方向键 preventDefault，网页自己的监听照常收到
+- **没有触摸屏的设备上，WebView 默认开启空间导航。** 网页没有 preventDefault 的方向键会把焦点移到按钮上，之后再按确定键，就会"点击"这个按钮（neon-racer 因此会在开局的同时误打开成就面板）。`input.mode: "keys"` 会对方向键 preventDefault，网页自己的监听照常收到
 - **WebView 重新获得焦点时会自动聚焦页面里第一个可聚焦元素**（关菜单、关错误页后 `requestFocus()` 就会触发），之后确定键会"点击"它。套壳设了 `setNeedInitialFocus(false)` 来避免
 - **2GB 内存很紧张。** 游戏进程常驻 190–285 MB，切到后台后经常被 lmkd 立刻杀掉（`low watermark is breached and swap is low`），再打开就是冷启动。没被杀的情况下，`onPause` 会让页面收到 `visibilitychange`，已验证
 - 网页里 `devicePixelRatio=2`，视口 960x540，`hardwareConcurrency=4`，`deviceMemory=2`，`navigator.userAgentData.mobile=true`，UA 中带 `Mobile`
@@ -213,10 +231,10 @@ adb -s 100.108.156.33:5555 logcat -s TVShell TVShell-web
 - 菜单项"成就档案"：调用 [`apps/neon-racer.tv.js`](apps/neon-racer.tv.js) 里的 `neonRacerTV.toggleArchive()`。游戏里的打开按钮原本只能用鼠标点
 - `back.web: true`：成就面板开着时，返回键先关面板（`neon-racer.tv.js` 处理 `tvshell:back`）
 - 快捷键（只对有彩色键的遥控器有用）：红键映射成 `Escape` 关闭面板，绿键映射成 `F2` 打开或关闭面板
-- `spatialNavigation: false`，避免开局时误点按钮
+- 输入方式 `keys`（默认，避免开局时误点按钮）和 `cursor` 可在菜单里切换。切到光标模式后，可以直接点游戏里的"成就档案"按钮
 - `devicePixelRatio: 1`
 
-操作方式：方向键左右移动、上跳、下滑铲，确定键开局，返回键打开菜单（继续 / 成就档案 / 刷新 / 退出）。
+操作方式：方向键左右移动、上跳、下滑铲，确定键开局，返回键打开菜单（继续 / 成就档案 / 输入方式 / 刷新 / 退出）。
 
 ### 帧率对比
 
@@ -240,7 +258,8 @@ tools/env.ps1         JDK/SDK/adb 路径，以及兼容 PowerShell 5.1 的小工
 app/                  安卓套壳（唯一的一份代码）
   src/main/java/.../ShellActivity.kt   WebView、按键、返回键、菜单、错误页、生命周期
   src/main/java/.../ShellConfig.kt     运行期配置解析
-  src/main/assets/tvshell/core.js      文档开始脚本：dpr/UA 覆盖、按键修复、合成按键、TVShell 接口、调试叠层、帧率
+  src/main/java/.../Cursor.kt          光标模式：指针、移动、点击、边缘滚动
+  src/main/assets/tvshell/core.js      文档开始脚本：dpr/UA 覆盖、按键修复、合成按键、边缘滚动、TVShell 接口、调试叠层、帧率
 build/gen/<名字>/     生成的资源、assets、build.json（Gradle 从这里读）
 dist/                 生成的 APK
 keystore/             签名（gitignore，请备份）

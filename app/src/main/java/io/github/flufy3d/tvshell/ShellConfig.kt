@@ -56,6 +56,15 @@ class ShellConfig(private val j: JSONObject) {
         for (from in o.keys()) if (!o.isNull(from)) put(knownKey(from, "aliases"), knownKey(o.getString(from), "aliases"))
     }
 
+    /**
+     * 输入方式。keys：方向键只作为键盘事件交给网页（游戏）；focus：WebView 空间导航，方向键在可点元素间移动焦点；
+     * cursor：方向键移动屏幕指针，确定键点击。modes 是菜单里可以切换的方式（少于两个就不显示切换项）。
+     */
+    private val input: JSONObject = j.optJSONObject("input") ?: JSONObject()
+    val inputMode: String = input.optString("mode", "focus").also { checkMode(it, "input.mode") }
+    val inputModes: List<String> = (input.optJSONArray("modes")?.strings() ?: listOf("focus", "cursor"))
+        .onEach { checkMode(it, "input.modes") }.ifEmpty { listOf(inputMode) }
+
     /** 遥控器键 → 网页键盘事件。返回键只按 back 策略处理，不能映射。 */
     val keys: Map<Int, WebKey> = buildMap {
         val o = j.optJSONObject("keys") ?: JSONObject()
@@ -72,7 +81,6 @@ class ShellConfig(private val j: JSONObject) {
     val userAgent: String? = inject.optString("userAgent").takeIf { it.isNotEmpty() && it != "null" }
     val userAgentData: JSONObject? = inject.optJSONObject("userAgentData")
     val fixKeyEvents: Boolean = inject.optBoolean("fixKeyEvents", true)
-    val spatialNavigation: Boolean = inject.optBoolean("spatialNavigation", true)
     val scripts: List<String> = inject.optJSONArray("scripts")?.strings() ?: emptyList()
 
     val debug: Boolean = j.optBoolean("debug", false)
@@ -87,6 +95,10 @@ class ShellConfig(private val j: JSONObject) {
             // "3" 是数字键 3（KEYCODE_3），不是键码 3（HOME）
             return KeyEvent.keyCodeFromString(if (n.startsWith("KEYCODE_")) n else "KEYCODE_$n")
         }
+
+        val MODES = linkedMapOf("keys" to "按键", "focus" to "焦点导航", "cursor" to "光标")
+
+        private fun checkMode(m: String, field: String) = require(m in MODES) { "$field 只能是 keys / focus / cursor：$m" }
 
         private fun knownKey(name: String, field: String): Int =
             keyCodeOf(name).also { require(it != KeyEvent.KEYCODE_UNKNOWN) { "$field: 未知的安卓按键 $name" } }

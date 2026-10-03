@@ -10,13 +10,16 @@
       { "label": "成就档案", "script": "neonRacerTV.toggleArchive()" }
     ]
   },
+  "input": {
+    "mode": "keys",
+    "modes": ["keys", "cursor"]
+  },
   "keys": {
     "PROG_RED": "Escape",
     "PROG_GREEN": "F2"
   },
   "inject": {
     "devicePixelRatio": 1,
-    "spatialNavigation": false,
     "scripts": ["neon-racer.tv.js"]
   }
 }

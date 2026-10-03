@@ -19,13 +19,16 @@
     "BUTTON_B": "BACK",
     "BUTTON_START": "MENU"
   },
+  "input": {
+    "mode": "focus",
+    "modes": ["focus", "cursor"]
+  },
   "keys": {},
   "inject": {
     "devicePixelRatio": null,
     "userAgent": null,
     "userAgentData": null,
     "fixKeyEvents": true,
-    "spatialNavigation": true,
     "scripts": []
   },
   "debug": false,

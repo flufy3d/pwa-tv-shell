@@ -59,6 +59,9 @@ class ShellActivity : Activity() {
     private var menuView: View? = null
     private var resumed = false
     private var keyLog: TextView? = null
+    private lateinit var cursor: Cursor
+    /** 当前输入方式（keys / focus / cursor），用户在菜单里切换后按应用记住。 */
+    private var mode = "focus"
 
     private val main = Handler(Looper.getMainLooper())
     private var debug = false
@@ -85,7 +88,8 @@ class ShellActivity : Activity() {
         debug = intent.getBooleanExtra("debug", cfg.debug)
         fpsLog = intent.getBooleanExtra("fps", cfg.fpsLog)
         dpr = if (intent.hasExtra("dpr")) intent.getFloatExtra("dpr", 0f).toDouble().takeIf { it > 0 } else cfg.devicePixelRatio
-        Log.i(TAG, "start ${cfg.app} ${cfg.startUrl} shell=${BuildConfig.SHELL_VERSION} debug=$debug fps=$fpsLog dpr=$dpr")
+        mode = prefs().getString(PREF_MODE, null)?.takeIf { it in cfg.inputModes } ?: cfg.inputMode
+        Log.i(TAG, "start ${cfg.app} ${cfg.startUrl} shell=${BuildConfig.SHELL_VERSION} mode=$mode debug=$debug fps=$fpsLog dpr=$dpr")
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root = FrameLayout(this).apply { setBackgroundColor(cfg.backgroundColor) }
@@ -97,7 +101,10 @@ class ShellActivity : Activity() {
             visibility = View.GONE
         }
         setContentView(root)
+        cursor = Cursor(this) { web }
         createWebView()
+        root.addView(cursor.view, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        cursor.enabled = mode == "cursor"
         root.addView(hint, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
             .apply { bottomMargin = dp(48) })
         if (debug) {
@@ -196,7 +203,7 @@ class ShellActivity : Activity() {
             .put("app", cfg.app).put("name", cfg.name).put("version", BuildConfig.SHELL_VERSION)
             .put("dpr", dpr ?: JSONObject.NULL)
             .put("uaData", cfg.userAgentData ?: JSONObject.NULL)
-            .put("fixKeyEvents", cfg.fixKeyEvents).put("spatialNavigation", cfg.spatialNavigation)
+            .put("fixKeyEvents", cfg.fixKeyEvents).put("mode", mode)
             .put("debug", debug).put("fps", fpsLog)
         val scripts = buildList {
             add(asset("tvshell/core.js").replace("/*CFG*/null", shellCfg.toString()))
@@ -270,9 +277,14 @@ class ShellActivity : Activity() {
         val isBack = code == KeyEvent.KEYCODE_BACK
         val isMenuKey = code in cfg.menuKeys
         val isMenuLong = code == cfg.menuLongPressKey
-        val mapped = if (web != null && errorView == null && !menuOpen) cfg.keys[code] else null
-        // 方向键/确定键等交给 WebView 原生处理（菜单打开时交给菜单按钮）
-        if (!isBack && !isMenuKey && !isMenuLong && mapped == null) return super.dispatchKeyEvent(e)
+        val pageActive = web != null && errorView == null && !menuOpen
+        val mapped = if (pageActive) cfg.keys[code] else null
+        if (!isBack && !isMenuKey && !isMenuLong && mapped == null) {
+            // 光标模式下方向键/确定键移动指针、点击；其余键（以及另外两种模式下的方向键/确定键）交给 WebView 原生处理，
+            // 菜单或错误页打开时交给它们的按钮
+            if (pageActive && cursor.enabled && cursor.handle(e)) return true
+            return super.dispatchKeyEvent(e)
+        }
 
         val p = presses[code] ?: Press().also { presses.put(code, it) }
         when (e.action) {
@@ -397,6 +409,7 @@ class ShellActivity : Activity() {
     private fun openMenu(reason: String) {
         if (menuView != null || exiting) return
         Log.i(TAG, "menu: open ($reason)")
+        cursor.reset()
         web?.onPause()
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -420,6 +433,12 @@ class ShellActivity : Activity() {
             m.key?.let { sendKey(it, "keydown", false); sendKey(it, "keyup", false) }
             m.script?.let { web?.evaluateJavascript(it, null) }
         }
+        if (cfg.inputModes.size > 1) item("输入方式：${ShellConfig.MODES[mode]}") {
+            closeMenu()
+            val next = cfg.inputModes[(cfg.inputModes.indexOf(mode) + 1) % cfg.inputModes.size]
+            setMode(next)
+            showHint(if (next == "cursor") "光标模式：方向键移动，确定键点击" else "输入方式：${ShellConfig.MODES[next]}")
+        }
         item("刷新") {
             closeMenu()
             Log.i(TAG, "menu: reload")
@@ -432,6 +451,16 @@ class ShellActivity : Activity() {
         menuView = scrim
         first.requestFocus()
     }
+
+    private fun setMode(m: String) {
+        Log.i(TAG, "input mode: $mode -> $m")
+        mode = m
+        prefs().edit().putString(PREF_MODE, m).apply()
+        cursor.enabled = m == "cursor"
+        web?.evaluateJavascript("window.__tvshell&&window.__tvshell.setMode(${JSONObject.quote(m)})", null)
+    }
+
+    private fun prefs() = getSharedPreferences("tvshell", MODE_PRIVATE)
 
     private fun closeMenu() {
         val v = menuView ?: return
@@ -548,6 +577,7 @@ class ShellActivity : Activity() {
     /** WebView.onPause 让页面变为 hidden，网页据此收到 visibilitychange 自动暂停。 */
     override fun onPause() {
         resumed = false
+        cursor.reset()
         web?.onPause()
         super.onPause()
     }
@@ -568,5 +598,6 @@ class ShellActivity : Activity() {
         const val WEB_TAG = "TVShell-web"
         const val EXIT_WINDOW = 2000L
         const val BACK_TIMEOUT = 1500L
+        const val PREF_MODE = "inputMode"
     }
 }

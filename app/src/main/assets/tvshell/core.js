@@ -1,5 +1,5 @@
 // TVShell 核心脚本：通过 WebViewCompat.addDocumentStartJavaScript 在网页任何脚本之前运行。
-// CFG 由 ShellActivity 在运行时替换进来：{app, name, version, dpr, uaData, fixKeyEvents, spatialNavigation, debug, fps}
+// CFG 由 ShellActivity 在运行时替换进来：{app, name, version, dpr, uaData, fixKeyEvents, mode, debug, fps}
 (function (CFG) {
   'use strict';
   if (!CFG || window.__tvshell) return;
@@ -39,6 +39,7 @@
   };
   const codeOf = k => CODE_OF[k] || (/^[0-9]$/.test(k) ? 'Digit' + k : /^[a-z]$/i.test(k) ? 'Key' + k.toUpperCase() : '');
   const ARROWS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+  let mode = CFG.mode; // keys / focus / cursor，菜单里切换时由 __tvshell.setMode 更新
   const held = new Set();
   window.addEventListener('blur', () => held.clear());
   for (const type of ['keydown', 'keyup']) {
@@ -55,8 +56,8 @@
         else held.add(id);
       }
       // 无触摸屏时 WebView 默认开启空间导航：方向键会把焦点移到按钮上，之后确定键会"点击"它。
-      // 游戏类应用关掉：方向键 preventDefault（网页自己的监听照常收到）。
-      if (!CFG.spatialNavigation && type === 'keydown' && ARROWS.has(e.key)) e.preventDefault();
+      // keys 模式（游戏）关掉：方向键 preventDefault（网页自己的监听照常收到）。cursor 模式下方向键不会传到网页。
+      if (mode === 'keys' && type === 'keydown' && ARROWS.has(e.key)) e.preventDefault();
     }, true);
   }
 
@@ -80,10 +81,58 @@
     return ev.defaultPrevented;
   }
 
-  hide(window, '__tvshell', Object.freeze({ key, back }));
+  // ── 光标模式的边缘滚动：指针推到屏幕边缘时由原生侧每帧调用。(fx, fy) 是指针在视口里的比例位置，dx/dy 是 CSS px ──
+  // 指针下的元素往上找能往这个方向滚的容器；找不到就用页面上可见面积最大的可滚动容器（内嵌滚动区常常不贴屏幕边缘）；
+  // 都没有就向指针下的元素派发 wheel 事件（给自己处理滚轮的 canvas 类应用）。返回 false 表示交给原生滚轮（跨域 iframe）。
+  const canScroll = (el, dx, dy) => {
+    const root = el === document.scrollingElement;
+    if (!root) {
+      const s = getComputedStyle(el);
+      const oy = /(auto|scroll|overlay)/.test(s.overflowY), ox = /(auto|scroll|overlay)/.test(s.overflowX);
+      if (!(dy && oy) && !(dx && ox)) return false;
+    }
+    if (dy > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
+    if (dy < 0 && el.scrollTop > 0) return true;
+    if (dx > 0 && el.scrollLeft + el.clientWidth < el.scrollWidth - 1) return true;
+    return dx < 0 && el.scrollLeft > 0;
+  };
+  let scrollables = null, scrollablesAt = 0;
+  const biggestScrollable = (dx, dy) => {
+    const now = performance.now();
+    if (!scrollables || now - scrollablesAt > 1000) {
+      scrollables = [];
+      scrollablesAt = now;
+      for (const el of document.querySelectorAll('*')) {
+        if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) scrollables.push(el);
+      }
+    }
+    let best = null, bestArea = 0;
+    for (const el of scrollables) {
+      if (!el.isConnected || !canScroll(el, dx, dy)) continue;
+      const r = el.getBoundingClientRect();
+      const w = Math.min(r.right, innerWidth) - Math.max(r.left, 0), h = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+      if (w > 0 && h > 0 && w * h > bestArea) { best = el; bestArea = w * h; }
+    }
+    return best;
+  };
+  function scroll(fx, fy, dx, dy) {
+    const x = fx * innerWidth, y = fy * innerHeight;
+    const hit = document.elementFromPoint(Math.min(x, innerWidth - 1), Math.min(y, innerHeight - 1));
+    if (hit && hit.tagName === 'IFRAME') return false;
+    let el = hit;
+    while (el && el.nodeType === 1 && !canScroll(el, dx, dy)) el = el.parentElement;
+    const se = document.scrollingElement;
+    const target = (el && el.nodeType === 1 ? el : null) || (se && canScroll(se, dx, dy) ? se : null) || biggestScrollable(dx, dy);
+    if (target) target.scrollBy(dx, dy);
+    else if (hit) hit.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, clientX: x, clientY: y, bubbles: true, cancelable: true, view: window }));
+    return true;
+  }
+
+  hide(window, '__tvshell', Object.freeze({ key, back, scroll, setMode: m => { mode = m; } }));
   Object.defineProperty(window, 'TVShell', {
     value: Object.freeze({
       version: CFG.version, app: CFG.app, debug: !!CFG.debug,
+      get inputMode() { return mode; },  // 当前输入方式：keys / focus / cursor
       exit: () => post('exit'),          // 退出 App
       back: () => post('back'),          // 执行套壳的默认返回（后退，或按 back.atRoot 处理）
       toast: msg => post('toast', String(msg)),
