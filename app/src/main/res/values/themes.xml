@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 窗口背景用网站的 background_color（build.ps1 生成 @color/shell_bg），避免启动白屏 -->
+    <style name="Shell" parent="android:Theme.DeviceDefault.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/shell_bg</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

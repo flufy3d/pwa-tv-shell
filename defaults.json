@@ -1,0 +1,33 @@
+{
+  "versionCode": 1,
+  "versionName": null,
+  "orientation": "landscape",
+  "appendQuery": "",
+  "origins": [],
+  "back": {
+    "web": false,
+    "atRoot": "confirm",
+    "exitHint": "再按一次返回键退出 · 长按返回键打开菜单"
+  },
+  "menu": {
+    "longPress": "BACK",
+    "keys": ["MENU", "TV_CONTENTS_MENU"],
+    "items": []
+  },
+  "aliases": {
+    "BUTTON_A": "DPAD_CENTER",
+    "BUTTON_B": "BACK",
+    "BUTTON_START": "MENU"
+  },
+  "keys": {},
+  "inject": {
+    "devicePixelRatio": null,
+    "userAgent": null,
+    "userAgentData": null,
+    "fixKeyEvents": true,
+    "spatialNavigation": true,
+    "scripts": []
+  },
+  "debug": false,
+  "fpsLog": false
+}

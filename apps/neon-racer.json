@@ -1,0 +1,22 @@
+{
+  "url": "https://flufy3d.github.io/neon-racer/",
+  "applicationId": "io.github.flufy3d.tv.neonracer",
+  "back": {
+    "web": true,
+    "atRoot": "menu"
+  },
+  "menu": {
+    "items": [
+      { "label": "成就档案", "script": "neonRacerTV.toggleArchive()" }
+    ]
+  },
+  "keys": {
+    "PROG_RED": "Escape",
+    "PROG_GREEN": "F2"
+  },
+  "inject": {
+    "devicePixelRatio": 1,
+    "spatialNavigation": false,
+    "scripts": ["neon-racer.tv.js"]
+  }
+}
