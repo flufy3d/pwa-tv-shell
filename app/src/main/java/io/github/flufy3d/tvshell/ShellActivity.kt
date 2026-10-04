@@ -67,6 +67,7 @@ class ShellActivity : Activity() {
     private var debug = false
     private var fpsLog = false
     private var dpr: Double? = null
+    private var startUrl = ""
 
     /** 每个键的按下状态：只认"看到过 repeat=0 的按下"的抬起，长按触发后抬起不再执行短按动作。 */
     private class Press(var down: Boolean = false, var long: Boolean = false)
@@ -84,12 +85,13 @@ class ShellActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         cfg = ShellConfig.load(this)
-        // adb 调试开关：am start -S -n <pkg>/io.github.flufy3d.tvshell.ShellActivity --ez debug true --ez fps true --ef dpr 0
+        // adb 调试开关：am start -S -n <pkg>/io.github.flufy3d.tvshell.ShellActivity --ez debug true --ez fps true --ef dpr 0 --es query bench=1
         debug = intent.getBooleanExtra("debug", cfg.debug)
         fpsLog = intent.getBooleanExtra("fps", cfg.fpsLog)
         dpr = if (intent.hasExtra("dpr")) intent.getFloatExtra("dpr", 0f).toDouble().takeIf { it > 0 } else cfg.devicePixelRatio
+        startUrl = ShellConfig.appendQuery(cfg.startUrl, intent.getStringExtra("query").orEmpty()) // 调试用：--es query bench=1
         mode = prefs().getString(PREF_MODE, null)?.takeIf { it in cfg.inputModes } ?: cfg.inputMode
-        Log.i(TAG, "start ${cfg.app} ${cfg.startUrl} shell=${BuildConfig.SHELL_VERSION} mode=$mode debug=$debug fps=$fpsLog dpr=$dpr")
+        Log.i(TAG, "start ${cfg.app} $startUrl shell=${BuildConfig.SHELL_VERSION} mode=$mode debug=$debug fps=$fpsLog dpr=$dpr")
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root = FrameLayout(this).apply { setBackgroundColor(cfg.backgroundColor) }
@@ -176,7 +178,7 @@ class ShellActivity : Activity() {
         installScripts(w)
         root.addView(w, 0, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         w.requestFocus()
-        w.loadUrl(cfg.startUrl)
+        w.loadUrl(startUrl)
     }
 
     /** window.TVShellNative：只对允许的源注入（不用 addJavascriptInterface，那个对所有页面和 iframe 都可见）。 */
@@ -219,11 +221,30 @@ class ShellActivity : Activity() {
     }
     private var fallbackScripts: List<String> = emptyList()
 
+    /**
+     * 主框架加载失败：宽限一会儿再显示错误页。Service Worker 用 fetch(event.request) 取导航请求失败时，
+     * WebView 也会当成主框架错误报上来，但 SW 随后会从缓存返回页面（重新触发 onPageStarted），这时不该闪错误页。
+     */
+    private fun failLoad(detail: String) {
+        loadFailed = true
+        pendingError?.let { main.removeCallbacks(it) }
+        pendingError = Runnable {
+            pendingError = null
+            if (!loadFailed) return@Runnable
+            Log.w(TAG, "error page: ${detail.lineSequence().first()}")
+            showError("无法打开 ${cfg.name}", detail) { retry() }
+        }.also { main.postDelayed(it, ERROR_GRACE) }
+    }
+    private var pendingError: Runnable? = null
+
     private fun asset(path: String) = assets.open(path).bufferedReader().use { it.readText() }
 
     private inner class ShellClient : WebViewClient() {
         override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+            Log.i(TAG, "page started $url")
             loadFailed = false
+            pendingError?.let { main.removeCallbacks(it) }
+            pendingError = null
             fallbackScripts.forEach { view.evaluateJavascript(it, null) }
         }
 
@@ -235,15 +256,13 @@ class ShellActivity : Activity() {
         override fun onReceivedError(view: WebView, req: WebResourceRequest, err: WebResourceError) {
             if (!req.isForMainFrame) return
             Log.w(TAG, "load error ${err.errorCode} ${err.description} ${req.url}")
-            loadFailed = true
-            showError("无法打开 ${cfg.name}", "${err.description}\n请检查网络后重试") { retry() }
+            failLoad("${err.description}\n请检查网络后重试")
         }
 
         override fun onReceivedHttpError(view: WebView, req: WebResourceRequest, resp: WebResourceResponse) {
             if (!req.isForMainFrame || resp.statusCode < 400) return
             Log.w(TAG, "http error ${resp.statusCode} ${req.url}")
-            loadFailed = true
-            showError("无法打开 ${cfg.name}", "服务器返回 ${resp.statusCode}") { retry() }
+            failLoad("服务器返回 ${resp.statusCode}")
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
@@ -598,6 +617,7 @@ class ShellActivity : Activity() {
         const val WEB_TAG = "TVShell-web"
         const val EXIT_WINDOW = 2000L
         const val BACK_TIMEOUT = 1500L
+        const val ERROR_GRACE = 2000L
         const val PREF_MODE = "inputMode"
     }
 }

@@ -200,11 +200,28 @@ addEventListener('tvshell:back', e => {
 ./install.ps1 neon-racer -Run -DebugKeys        # 装完启动，打开按键叠层
 ./install.ps1 neon-racer -NoInstall -Fps        # 只重启，输出帧率日志
 ./install.ps1 neon-racer -NoInstall -Fps -Dpr 0 # 临时不覆盖 devicePixelRatio（对比帧率用）
+./install.ps1 neon-racer -NoInstall -Query "bench=1&benchsec=30"   # 网址临时追加参数
 ```
 
 - `-DebugKeys`：屏幕左下角显示原生收到的 KeyEvent（键名、repeat、flags、source、deviceId、scanCode），右下角显示网页实际收到的 keydown/keyup（key、code、keyCode、repeat、isTrusted、是否被修复或映射、是否被 preventDefault、焦点元素）。同时开启 `chrome://inspect` 远程调试
 - `-Fps`：每 5 秒把 rAF 帧率、最慢一帧、超过 33ms 的帧数、canvas 实际绘制尺寸打到 logcat
-- 这些参数本质上是 `am start -S ... --ez debug true --ez fps true --ef dpr <值>`，所以每次都会冷启动
+- `-Query`：在网址后面临时追加参数，比如打开网页自己的测试模式
+- 这些参数本质上是 `am start -S ... --ez debug true --ez fps true --ef dpr <值> --es query <参数>`，所以每次都会冷启动
+
+查看网页内部状态：App 用 `-DebugKeys` 启动后，可以用 `tools/cdp.mjs`（Node 18 以上）通过 Chrome DevTools 协议在页面里执行一段 JS，结果打印出来：
+
+```sh
+node tools/cdp.mjs io.github.flufy3d.tv.neonracer "(async()=>({tv:document.documentElement.className, sw:!!navigator.serviceWorker.controller, caches:await caches.keys()}))()"
+# 导航是否经过 SW、从哪里取的：workerStart > 0 表示经过 SW；deliveryType 为 cache（HTTP 缓存）或 cache-storage（SW 缓存）
+node tools/cdp.mjs io.github.flufy3d.tv.neonracer "(n=>({workerStart:n.workerStart, deliveryType:n.deliveryType}))(performance.getEntriesByType('navigation')[0])"
+```
+
+测离线：用 root 的 iptables 只断这个 App 的网络（adb 走网络连接，不能整机断网），uid 用 `adb shell pm list packages -U <包名>` 查：
+
+```sh
+adb shell su -c "'iptables -I OUTPUT -m owner --uid-owner <uid> -j REJECT; ip6tables -I OUTPUT -m owner --uid-owner <uid> -j REJECT'"
+# 测完把 -I 换成 -D 删掉规则
+```
 
 查看日志：
 
@@ -221,6 +238,7 @@ adb -s 100.108.156.33:5555 logcat -s TVShell TVShell-web
 - **没有触摸屏的设备上，WebView 默认开启空间导航。** 网页没有 preventDefault 的方向键会把焦点移到按钮上，之后再按确定键，就会"点击"这个按钮（neon-racer 因此会在开局的同时误打开成就面板）。`input.mode: "keys"` 会对方向键 preventDefault，网页自己的监听照常收到
 - **WebView 重新获得焦点时会自动聚焦页面里第一个可聚焦元素**（关菜单、关错误页后 `requestFocus()` 就会触发），之后确定键会"点击"它。套壳设了 `setNeedInitialFocus(false)` 来避免
 - **2GB 内存很紧张。** 游戏进程常驻 190–285 MB，切到后台后经常被 lmkd 立刻杀掉（`low watermark is breached and swap is low`），再打开就是冷启动。没被杀的情况下，`onPause` 会让页面收到 `visibilitychange`，已验证
+- **Service Worker 取导航请求失败时，WebView 也会报主框架加载错误。** SW 用 `fetch(event.request)` 去网络取页面，断网时这次失败会触发 `onReceivedError`（`isForMainFrame=true`）。但 SW 接着从缓存返回了页面，大约 0.8 秒后再次触发 `onPageStarted`。所以套壳收到主框架错误后先等 2 秒，期间页面重新开始加载就不显示错误页，否则断网时会先闪一下"无法打开"
 - 网页里 `devicePixelRatio=2`，视口 960x540，`hardwareConcurrency=4`，`deviceMemory=2`，`navigator.userAgentData.mobile=true`，UA 中带 `Mobile`
 
 ## neon-racer 的配置
@@ -232,20 +250,20 @@ adb -s 100.108.156.33:5555 logcat -s TVShell TVShell-web
 - `back.web: true`：成就面板开着时，返回键先关面板（`neon-racer.tv.js` 处理 `tvshell:back`）
 - 快捷键（只对有彩色键的遥控器有用）：红键映射成 `Escape` 关闭面板，绿键映射成 `F2` 打开或关闭面板
 - 输入方式 `keys`（默认，避免开局时误点按钮）和 `cursor` 可在菜单里切换。切到光标模式后，可以直接点游戏里的"成就档案"按钮
-- `devicePixelRatio: 1`
 
 操作方式：方向键左右移动、上跳、下滑铲，确定键开局，返回键打开菜单（继续 / 成就档案 / 输入方式 / 刷新 / 退出）。
 
-### 帧率对比
+### 电视档位与帧率
 
-测试方法：先在开始页停 10 秒，然后每 8 秒按一次确定键反复开局（没人操作，每局大约 7 秒就会撞毁）。每 5 秒一个窗口：
+neon-racer 检测到 `window.TVShell` 时会自动进入电视档位：去掉毛玻璃等高开销的 CSS，渲染分辨率固定为 540 线、游戏中不调档，用轻量辉光，开局前预编译着色器。所以套壳不再注入 devicePixelRatio。
 
-| | 开始页 fps | 游戏中 fps（各 5 秒窗口） | canvas 尺寸 |
-|---|---|---|---|
-| 注入 dpr=1 | 31.1 / 36.0 | 37.4, 59.4, 55.2, 46.7, 41.9, 40.4, 45.6 | 672x378 – 768x432 |
-| 原生 dpr=2 | 29.8 / 34.0 | 33.3, 58.0, 55.2, 59.6, 52.8, 52.4, 59.8 | 672x378 – 1056x594 |
+用游戏自带的测帧率模式（`-Query bench=1`，再按确定开局，自动驾驶 60 秒）在盒子上测的结果：
 
-游戏自带按帧率自适应分辨率的逻辑。判定为手机低配时，pixelRatio 在 0.7 到 min(dpr, 1.5) 之间调整，所以两种情况都会自己降档。注入 dpr=1 只是把上限从 1.5 压到 1.0，帧率并没有明显提升；不注入时，游戏反而能升到 1.1 倍分辨率并接近 60fps。开始页两种情况都只有 30–36fps，canvas 尺寸也相同，瓶颈应该不在 WebGL 的分辨率上。
+| 场景 | fps | 最慢一帧 |
+|---|---|---|
+| 开始页 | 稳定 60 | < 50ms |
+| 游戏中（5 秒窗口） | 33–55，平均约 44，后期特效多时偏低 | 75–165ms |
+| 结算页 | 稳定 60（结算瞬间有几帧 150–214ms） | < 30ms |
 
 ## 目录结构
 
@@ -254,6 +272,7 @@ apps/                 每个应用的配置和注入脚本
 defaults.json         所有配置字段的默认值
 build.ps1             解析配置、生成资源、编译 → dist/<名字>.apk
 install.ps1           adb 安装、启动、调试开关
+tools/cdp.mjs         在盒子上的页面里执行 JS（Chrome DevTools 协议）
 tools/env.ps1         JDK/SDK/adb 路径，以及兼容 PowerShell 5.1 的小工具
 app/                  安卓套壳（唯一的一份代码）
   src/main/java/.../ShellActivity.kt   WebView、按键、返回键、菜单、错误页、生命周期

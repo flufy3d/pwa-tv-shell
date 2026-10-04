@@ -5,6 +5,7 @@
   ./install.ps1 neon-racer
   ./install.ps1 neon-racer -Run                     # 装完启动
   ./install.ps1 neon-racer -Run -NoInstall -DebugKeys -Fps -Dpr 0   # 只重启：按键叠层 + 帧率日志 + 不覆盖 dpr
+  ./install.ps1 neon-racer -NoInstall -Fps -Query bench=1            # 网址临时追加参数
 #>
 param(
     [Parameter(Mandatory, Position = 0)][string]$App,
@@ -13,6 +14,7 @@ param(
     [switch]$DebugKeys,   # 调试叠层：屏幕上显示原生按键和网页收到的按键事件，并开启 chrome://inspect
     [switch]$Fps,         # 每 5 秒把 rAF 帧率打到 logcat（TVShell-web）
     [double]$Dpr = -1,    # 覆盖配置里的 devicePixelRatio：0 = 不覆盖，>0 = 指定值，-1 = 用配置
+    [string]$Query,       # 网址临时追加的参数，比如 bench=1
     [string]$Serial       # 设备，默认 $env:TVSHELL_DEVICE 或 100.108.156.33:5555
 )
 $ErrorActionPreference = 'Stop'
@@ -41,5 +43,6 @@ if ($Run -or $NoInstall) {
     if ($DebugKeys) { $extra += '--ez', 'debug', 'true' }
     if ($Fps) { $extra += '--ez', 'fps', 'true' }
     if ($Dpr -ge 0) { $extra += '--ef', 'dpr', "$Dpr" }
+    if ($Query) { $extra += '--es', 'query', "'$Query'" } # 单引号：& 等字符会被盒子上的 shell 解释
     Invoke-Adb shell am start -S -n "$pkg/io.github.flufy3d.tvshell.ShellActivity" @extra
 }

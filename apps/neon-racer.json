@@ -19,7 +19,6 @@
     "PROG_GREEN": "F2"
   },
   "inject": {
-    "devicePixelRatio": 1,
     "scripts": ["neon-racer.tv.js"]
   }
 }
