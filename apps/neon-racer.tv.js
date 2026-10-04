@@ -2,6 +2,7 @@
 // - 套壳菜单里的"成就档案"调用 neonRacerTV.toggleArchive()，任何遥控器都能用
 // - 返回键（back.web=true）在面板打开时先关面板
 // - 有彩色键的遥控器：绿键（映射成 F2）打开/关闭，红键（映射成 Escape）关闭
+// - 面板开着时上下键滚动面板
 (function () {
   const $ = id => document.getElementById(id);
   const archiveOpen = () => { const p = $('achieveScreen'); return !!p && !p.classList.contains('hidden'); };
@@ -18,5 +19,11 @@
   });
   addEventListener('keydown', e => {
     if (e.code === 'F2' && !e.repeat) toggleArchive();
+    // 面板开着时上下键滚动面板：按键模式下套壳对方向键 preventDefault，游戏自己也不处理面板滚动。
+    // 按住时遥控器的重复按下会继续滚。
+    if (archiveOpen() && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+      const panel = document.querySelector('#achieveScreen .achievePanel');
+      if (panel) panel.scrollBy({ top: (e.code === 'ArrowDown' ? 1 : -1) * panel.clientHeight * 0.4, behavior: 'smooth' });
+    }
   });
 })();

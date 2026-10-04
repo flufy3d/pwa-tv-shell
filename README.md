@@ -248,6 +248,7 @@ adb -s 100.108.156.33:5555 logcat -s TVShell TVShell-web
 - `back.atRoot: "menu"`：游戏中按返回直接打开菜单，游戏同时暂停。"再按一次退出"的提示期间游戏还在跑，容易撞毁
 - 菜单项"成就档案"：调用 [`apps/neon-racer.tv.js`](apps/neon-racer.tv.js) 里的 `neonRacerTV.toggleArchive()`。游戏里的打开按钮原本只能用鼠标点
 - `back.web: true`：成就面板开着时，返回键先关面板（`neon-racer.tv.js` 处理 `tvshell:back`）
+- 成就面板开着时，上下键滚动面板（按键模式下方向键不会触发网页的原生滚动，由 `neon-racer.tv.js` 处理）
 - 快捷键（只对有彩色键的遥控器有用）：红键映射成 `Escape` 关闭面板，绿键映射成 `F2` 打开或关闭面板
 - 输入方式 `keys`（默认，避免开局时误点按钮）和 `cursor` 可在菜单里切换。切到光标模式后，可以直接点游戏里的"成就档案"按钮
 
