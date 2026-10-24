@@ -16,6 +16,10 @@
     "ece8.com/ads",
     "ece8.com/static/ds3/img/"
   ],
+  "back": {
+    "web": true,
+    "atRoot": "confirm"
+  },
   "input": {
     "mode": "focus",
     "modes": ["focus", "cursor"]
@@ -24,15 +28,6 @@
     "PROG_RED": "F1",
     "PROG_GREEN": "F2",
     "SEARCH": "F3"
-  },
-  "menu": {
-    "items": [
-      { "label": "搜索", "script": "TVShell.search()" },
-      { "label": "播放 / 暂停", "script": "csxyyTV.togglePlay()" },
-      { "label": "下一集", "script": "csxyyTV.nextEpisode()" },
-      { "label": "选集", "script": "csxyyTV.showEpisodes()" },
-      { "label": "弹幕 开/关", "script": "csxyyTV.toggleDanmaku()" }
-    ]
   },
   "inject": {
     "scripts": ["csxyy.tv.js"]

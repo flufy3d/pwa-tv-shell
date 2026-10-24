@@ -565,17 +565,28 @@ class ShellActivity : Activity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(32), dp(24), dp(32), dp(24))
-            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xF0181820.toInt()) }
+            setPadding(dp(30), dp(24), dp(30), dp(22))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(20).toFloat()
+                setColor(0xF20E1219.toInt())
+                setStroke(dp(1), 0x24FFFFFF)
+            }
         }
         panel.addView(TextView(this).apply {
             text = cfg.name
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = dp(16) })
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = dp(4) })
+        panel.addView(TextView(this).apply {
+            text = "方向键选择 · 返回键关闭"
+            setTextColor(0xFF7F8A9E.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = dp(14) })
         fun item(label: String, action: () -> Unit) = button(label) { action() }.also {
-            panel.addView(it, LinearLayout.LayoutParams(dp(280), WRAP_CONTENT).apply { topMargin = dp(10) })
+            panel.addView(it, LinearLayout.LayoutParams(dp(320), WRAP_CONTENT).apply { topMargin = dp(8) })
         }
         val first = item("继续") { closeMenu() }
         for (m in cfg.menuItems) item(m.label) {
@@ -678,13 +689,14 @@ class ShellActivity : Activity() {
     private fun button(text: String, onClick: () -> Unit) = Button(this).apply {
         this.text = text
         isAllCaps = false
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
         setTextColor(Color.WHITE)
-        setPadding(dp(32), dp(10), dp(32), dp(10))
-        fun bg(c: Int) = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(c) }
+        setPadding(dp(24), dp(10), dp(24), dp(10))
+        minHeight = dp(52)
+        fun bg(c: Int) = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(c) }
         background = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), bg(0xFF2979FF.toInt()))
-            addState(intArrayOf(), bg(0x40FFFFFF))
+            addState(intArrayOf(android.R.attr.state_focused), bg(0xFFFF5A3C.toInt()))
+            addState(intArrayOf(), bg(0x1AFFFFFF))
         }
         isFocusable = true
         setOnClickListener { onClick() }
