@@ -1,0 +1,40 @@
+{
+  "url": "https://www.csxyy.com/",
+  "applicationId": "io.github.flufy3d.tv.csxyy",
+  "name": "CN影视",
+  "bannerText": "CN影视",
+  "icon": "https://www.csxyy.com/static/ds3/img/favicon.png",
+  "iconMaskable": true,
+  "backgroundColor": "#111319",
+  "blockExternal": true,
+  "allowHosts": ["csxyy.com"],
+  "blockUrls": [
+    "ladyoffices.com",
+    "jjbno1.com",
+    "avfuck.top",
+    "78673.vip",
+    "ece8.com/ads",
+    "ece8.com/static/ds3/img/"
+  ],
+  "input": {
+    "mode": "focus",
+    "modes": ["focus", "cursor"]
+  },
+  "keys": {
+    "PROG_RED": "F1",
+    "PROG_GREEN": "F2",
+    "SEARCH": "F3"
+  },
+  "menu": {
+    "items": [
+      { "label": "搜索", "script": "TVShell.search()" },
+      { "label": "播放 / 暂停", "script": "csxyyTV.togglePlay()" },
+      { "label": "下一集", "script": "csxyyTV.nextEpisode()" },
+      { "label": "选集", "script": "csxyyTV.showEpisodes()" },
+      { "label": "弹幕 开/关", "script": "csxyyTV.toggleDanmaku()" }
+    ]
+  },
+  "inject": {
+    "scripts": ["csxyy.tv.js"]
+  }
+}

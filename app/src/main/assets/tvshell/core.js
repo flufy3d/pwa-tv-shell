@@ -136,6 +136,7 @@
       exit: () => post('exit'),          // 退出 App
       back: () => post('back'),          // 执行套壳的默认返回（后退，或按 back.atRoot 处理）
       toast: msg => post('toast', String(msg)),
+      search: () => post('search'),      // 打开原生搜索框（站内搜索）
     }),
     enumerable: false,
   });

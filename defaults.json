@@ -3,6 +3,9 @@
   "versionName": null,
   "orientation": "landscape",
   "appendQuery": "",
+  "blockExternal": false,
+  "allowHosts": [],
+  "blockUrls": [],
   "origins": [],
   "back": {
     "web": false,

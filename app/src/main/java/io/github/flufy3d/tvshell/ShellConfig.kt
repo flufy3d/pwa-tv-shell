@@ -24,6 +24,18 @@ class ShellConfig(private val j: JSONObject) {
     val startUrl: String = appendQuery(url, j.optString("appendQuery", ""))
     val backgroundColor: Int = parseColor(j.optString("backgroundColor", "#000000"))
 
+    /** 拦截跳转到 allowHosts 以外主机的页面/iframe 导航，防止误点广告离开 App。 */
+    val blockExternal: Boolean = j.optBoolean("blockExternal", false)
+    /** 允许导航的主机白名单；写根域即可，自动允许子域。为空时用 url 自己的主机。 */
+    val allowHosts: List<String> = (j.optJSONArray("allowHosts")?.strings() ?: emptyList())
+        .map { it.trim().lowercase() }
+        .filter { it.isNotEmpty() }
+        .ifEmpty { listOfNotNull(Uri.parse(url).host?.lowercase()) }
+    /** 命中这些子串的网络请求直接返回空响应（广告域名/路径）。 */
+    val blockUrls: List<String> = (j.optJSONArray("blockUrls")?.strings() ?: emptyList())
+        .map { it.trim().lowercase() }
+        .filter { it.isNotEmpty() }
+
     /** 允许注入脚本和 TVShell 接口的源：网址本身的源 + 配置里的 origins。 */
     val origins: Set<String> = buildSet {
         add(originOf(url))

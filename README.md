@@ -82,6 +82,9 @@ Gradle 用仓库里的 wrapper（8.14.3），AGP 8.13.2，Kotlin 2.4.10。
 | `versionName` | 套壳版本（`VERSION` 文件） | 显示用的版本名 |
 | `orientation` | `"landscape"` | 屏幕方向，对应 `android:screenOrientation` |
 | `appendQuery` | `""` | 追加到网址后面的参数，例如 `"tv=1"`，网页可以据此判断自己在电视上运行 |
+| `blockExternal` | `false` | 拦截跳转到 `allowHosts` 以外主机的页面/子框架导航，误点广告不会离开 App |
+| `allowHosts` | `[url 的主机]` | `blockExternal` 的白名单；写根域即可，自动包含子域，例如 `["example.com"]` |
+| `blockUrls` | `[]` | 命中这些子串的网络请求直接返回空响应（广告域名/路径），例如 `["doubleclick.net"]` |
 | `origins` | `[]` | 除 `url` 自身的源以外，还允许注入脚本和使用 `TVShell` 接口的源，例如 `["https://cdn.example.com"]` |
 | `back.web` | `false` | 返回键先交给网页：派发可取消的 `tvshell:back` 事件，见下文 |
 | `back.atRoot` | `"confirm"` | 没有历史可后退时怎么办：`confirm` 提示后 2 秒内再按一次退出，`menu` 打开套壳菜单，`exit` 直接退出 |
@@ -186,6 +189,7 @@ if (window.TVShell) {
   TVShell.exit();         // 退出 App
   TVShell.back();         // 执行套壳的默认返回（后退，或按 back.atRoot 处理）
   TVShell.toast('文字');  // 屏幕底部提示 2 秒
+  TVShell.search();       // 打开原生搜索框（输入后跳到站内 /search?wd=）
 }
 
 // 仅在 back.web = true 时触发
@@ -265,6 +269,25 @@ neon-racer 检测到 `window.TVShell` 时会自动进入电视档位：去掉毛
 | 开始页 | 稳定 60 | < 50ms |
 | 游戏中（5 秒窗口） | 33–55，平均约 44，后期特效多时偏低 | 75–165ms |
 | 结算页 | 稳定 60（结算瞬间有几帧 150–214ms） | < 30ms |
+
+## CN影视（csxyy.com）的配置
+
+[`apps/csxyy.json`](apps/csxyy.json) + [`apps/csxyy.tv.js`](apps/csxyy.tv.js)：把一个没有 TV 版的 MacCMS 影视站包成电视 App。
+
+```powershell
+./build.ps1 csxyy
+./install.ps1 csxyy -Run
+```
+
+- **去广告**：`blockUrls` 在原生层直接挡掉 `ladyoffices.com`、`jjbno1.com`、`avfuck.top`、`78673.vip` 和 `ece8.com` 的广告图片；注入脚本再删除 `.ec-ad` / `.ad-container` / `#ADplayer` 等容器和首页轮播里的外链广告
+- **外链兜底**：`blockExternal: true`，只允许 `csxyy.com` 及其子域的页面导航；误点广告链接会被拦截，不会离开 App
+- **搜索**：菜单第一项"搜索"或红键/搜索键打开原生搜索框，调用系统输入法（支持拼音、语音）；提交后跳到站内 `/search?wd=`。搜索结果页会禁用页面自带的搜索框自动聚焦，避免输入法盖住结果；结果卡片只保留海报、片名和"播放正片"三个焦点
+- **首页**：隐藏搜索/播放记录/头像/"更多"，把 首页/电影/电视剧/综艺/动漫/短剧/资讯 平铺到顶部；首页轮播压到 320px，只留当前海报，停止自动轮播
+- **焦点**：卡片、选集按钮加 4px 蓝色描边；焦点进入视口时自动滚动到中间；详情页的年份/地区/演员等标签不参与焦点导航，方向键更快到"立即播放"
+- **播放页**：自动进入全屏，只留播放器；方向键左右快退/快进 10 秒、上下调音量、确定键暂停；返回键退出
+- **菜单**：长按返回键打开，除"继续/输入方式/刷新/退出"外有"搜索"、"播放 / 暂停"、"下一集"、"选集"、"弹幕 开/关"；"选集"会暂停并滚动到剧集列表。菜单项多时用原生 ScrollView 滚动
+- **弹幕**：默认保留；有彩色键的遥控器按绿键（映射成 `F2`）开关，或长按返回键在菜单里选"弹幕 开/关"。关闭后会记在 localStorage，换集/重开 App 仍保持关闭；红键或搜索键（映射成 `F1` / `F3`）直接打开搜索
+- 站点改版后广告选择器可能要补；`blockUrls` 是最后一道防线
 
 ## 目录结构
 

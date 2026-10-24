@@ -9,11 +9,13 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.InputType
 import android.util.Log
 import android.util.SparseArray
 import android.util.TypedValue
@@ -25,6 +27,8 @@ import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.webkit.ConsoleMessage
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
@@ -35,13 +39,16 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.webkit.ServiceWorkerControllerCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 
 /**
  * 全屏 WebView 套壳。
@@ -57,6 +64,8 @@ class ShellActivity : Activity() {
     private var web: WebView? = null
     private var errorView: View? = null
     private var menuView: View? = null
+    private var searchView: View? = null
+    private var searchInput: EditText? = null
     private var resumed = false
     private var keyLog: TextView? = null
     private lateinit var cursor: Cursor
@@ -195,6 +204,7 @@ class ShellActivity : Activity() {
                 "exit" -> exit("TVShell.exit()")
                 "back" -> defaultBack(SystemClock.uptimeMillis())
                 "toast" -> showHint(o.optString("arg"))
+                "search" -> openSearch()
             }
         }
     }
@@ -266,14 +276,40 @@ class ShellActivity : Activity() {
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
-            val scheme = req.url.scheme ?: return true
-            if (scheme == "http" || scheme == "https") return false
+            val url = req.url
+            val scheme = url.scheme ?: return true
+            if (scheme == "http" || scheme == "https") {
+                if (cfg.blockExternal && !hostAllowed(url.host)) {
+                    Log.i(TAG, "blocked external nav ${url.host} $url")
+                    showHint("已拦截外部链接")
+                    return true
+                }
+                return false
+            }
             try {
-                startActivity(Intent(Intent.ACTION_VIEW, req.url))
+                startActivity(Intent(Intent.ACTION_VIEW, url))
             } catch (_: ActivityNotFoundException) {
-                Log.w(TAG, "no handler for ${req.url}")
+                Log.w(TAG, "no handler for $url")
             }
             return true
+        }
+
+        /** 命中 blockUrls（广告域名/路径）的请求直接返回空响应，不产生流量。 */
+        override fun shouldInterceptRequest(view: WebView, req: WebResourceRequest): WebResourceResponse? {
+            if (cfg.blockUrls.isEmpty()) return null
+            val u = req.url.toString().lowercase()
+            if (cfg.blockUrls.none { u.contains(it) }) return null
+            Log.i(TAG, "blocked request ${req.url.host} $u")
+            return WebResourceResponse(
+                "text/plain", "utf-8", 204, "No Content",
+                mapOf("Cache-Control" to "no-store"),
+                ByteArrayInputStream(ByteArray(0)),
+            )
+        }
+
+        private fun hostAllowed(host: String?): Boolean {
+            val h = host?.lowercase() ?: return false
+            return cfg.allowHosts.any { h == it || h.endsWith(".$it") }
         }
 
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -289,6 +325,13 @@ class ShellActivity : Activity() {
     // ───────────────────────────── 按键 ─────────────────────────────
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (searchView != null) {
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                if (event.action == KeyEvent.ACTION_UP) closeSearch()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if (debug) logKey(event)
         val e = cfg.aliases[event.keyCode]?.let { alias(event, it) } ?: event
         val code = e.keyCode
@@ -422,11 +465,100 @@ class ShellActivity : Activity() {
     }
 
     /**
+     * 原生搜索框：用系统输入法输入中文，提交后跳到站内搜索页。
+     * 电视遥控器没有字母键，必须让系统 IME 弹出来；输入法自带拼音/语音输入。
+     */
+    private fun openSearch() {
+        if (menuView != null || searchView != null || exiting) return
+        Log.i(TAG, "search: open")
+        cursor.reset()
+        web?.onPause()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(28), dp(22), dp(28), dp(22))
+            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xF0181820.toInt()) }
+        }
+        panel.addView(TextView(this).apply {
+            text = "搜索 ${cfg.name}"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = dp(16) })
+        val input = EditText(this).apply {
+            hint = "输入片名、演员或关键词"
+            setSingleLine(true)
+            setTextColor(Color.WHITE)
+            setHintTextColor(0x88FFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0xFF262633.toInt()) }
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setText(prefs().getString("last_search", "") ?: "")
+            setSelection(text.length)
+        }
+        panel.addView(input, LinearLayout.LayoutParams(dp(560), WRAP_CONTENT))
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                submitSearch(input)
+                true
+            } else false
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        row.addView(button("搜索") { submitSearch(input) }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = dp(16) })
+        row.addView(button("取消") { closeSearch() }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        panel.addView(row, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(18) })
+        val scrim = FrameLayout(this).apply { setBackgroundColor(0x99000000.toInt()); isClickable = true }
+        scrim.addView(panel, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = dp(40)
+        })
+        root.addView(scrim, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        searchView = scrim
+        searchInput = input
+        input.requestFocus()
+        input.post {
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager ?: return@post
+            imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun closeSearch() {
+        val v = searchView ?: return
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        searchInput?.let {
+            imm?.hideSoftInputFromWindow(it.windowToken, 0)
+            it.clearFocus()
+        }
+        imm?.hideSoftInputFromWindow(v.windowToken, 0)
+        currentFocus?.clearFocus()
+        searchInput = null
+        root.removeView(v)
+        searchView = null
+        if (resumed) web?.onResume()
+        web?.requestFocus()
+    }
+
+    private fun submitSearch(input: EditText) {
+        val q = input.text.toString().trim()
+        if (q.isEmpty()) {
+            showHint("请输入关键词")
+            return
+        }
+        val url = ShellConfig.originOf(cfg.url) + "/search?wd=" + Uri.encode(q)
+        Log.i(TAG, "search: $q -> $url")
+        prefs().edit().putString("last_search", q).apply()
+        closeSearch()
+        web?.loadUrl(url)
+    }
+
+    /**
      * 套壳菜单：继续 / 应用自定义动作 / 刷新 / 退出，只用方向键、确定键、返回键就能操作。
      * 打开期间 WebView.onPause，网页收到 visibilitychange（游戏会自动暂停）。
      */
     private fun openMenu(reason: String) {
-        if (menuView != null || exiting) return
+        if (menuView != null || searchView != null || exiting) return
         Log.i(TAG, "menu: open ($reason)")
         cursor.reset()
         web?.onPause()
@@ -464,8 +596,20 @@ class ShellActivity : Activity() {
             if (web == null) recreate() else { hideError(); web?.reload() }
         }
         item("退出") { exit("menu") }
+        // 菜单项可能比屏幕高（搜索 + 播放控制 + 选集…）：放进 ScrollView，方向键会自动滚到焦点
+        val frame = FrameLayout(this).apply {
+            minimumHeight = resources.displayMetrics.heightPixels - dp(48)
+        }
+        frame.addView(panel, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER))
+        val scroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            addView(frame, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        }
         val scrim = FrameLayout(this).apply { setBackgroundColor(0x99000000.toInt()); isClickable = true }
-        scrim.addView(panel, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER))
+        scrim.addView(scroll, FrameLayout.LayoutParams(WRAP_CONTENT, MATCH_PARENT, Gravity.CENTER).apply {
+            topMargin = dp(24)
+            bottomMargin = dp(24)
+        })
         root.addView(scrim, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         menuView = scrim
         first.requestFocus()
