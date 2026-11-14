@@ -300,6 +300,9 @@
     // 播放器自带的低清 loading 图标（360buyimg 雪碧图）换成 CSS 转圈，任何分辨率都清晰
     '#loading-box .pic{background:none!important;width:64px!important;height:64px!important;margin:-32px 0 0 -32px!important;border:5px solid rgba(255,255,255,.18)!important;border-top-color:#ff5a3c!important;border-radius:50%!important;position:absolute!important;left:50%!important;top:50%!important;transform:none!important;animation:tvshell-spin 1s linear infinite!important}',
     '@keyframes tvshell-spin{to{transform:rotate(360deg)}}',
+    // 视频没起播前先隐藏 <video>，避免 WebView 把它画成巨大的低清播放占位图
+    '.yzmplayer video.yzmplayer-video{visibility:hidden!important}',
+    '.yzmplayer video.yzmplayer-video.tv-video-ready{visibility:visible!important}',
 
     // 播放页操作条：暂停时出现，方向键选择，确定执行
     '.tv-hud{display:none!important;position:fixed!important;left:0!important;right:0!important;bottom:0!important;z-index:99990!important;box-sizing:border-box!important;padding:70px 48px 28px!important;color:#fff!important;background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.84) 36%,#000 100%)!important;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif!important}',
@@ -1827,11 +1830,46 @@
     }, 6000);
   }
 
+  // 视频元素在无数据时会被 WebView 画成一个巨大的低清播放占位图。
+  // 起播前把 video 隐藏，用自己的高清 CSS 转圈遮住；canplay/playing 后再显示视频。
+  function ensureVideoGate(dp) {
+    var v = dp && dp.video;
+    if (!v || !v.ownerDocument) return;
+    if (v.__tvGate) return;
+    v.__tvGate = true;
+    var doc = v.ownerDocument;
+    var gate = doc.getElementById('tv-video-gate');
+    if (!gate) {
+      gate = doc.createElement('div');
+      gate.id = 'tv-video-gate';
+      gate.innerHTML = '<div class="tv-gate-spinner"></div><div class="tv-gate-text">线路加载中，请稍候…</div>';
+      var st = doc.createElement('style');
+      st.id = 'tv-video-gate-style';
+      st.textContent = '#tv-video-gate{position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;z-index:2147483000!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:22px!important;background:#050608!important;color:#cfd6e4!important;font:600 22px/1.4 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif!important;pointer-events:none!important}#tv-video-gate .tv-gate-spinner{width:64px!important;height:64px!important;border:5px solid rgba(255,255,255,.14)!important;border-top-color:#ff5a3c!important;border-radius:50%!important;animation:tv-gate-spin .9s linear infinite!important;box-sizing:border-box!important}#tv-video-gate .tv-gate-text{opacity:.9!important}@keyframes tv-gate-spin{to{transform:rotate(360deg)}}';
+      (doc.head || doc.documentElement).appendChild(st);
+      (doc.body || doc.documentElement).appendChild(gate);
+    }
+    v.classList.remove('tv-video-ready');
+    v.style.setProperty('visibility', 'hidden', 'important');
+    gate.style.setProperty('display', 'flex', 'important');
+    var show = function () {
+      if (!videoLooksPlaying(dp)) return;
+      v.classList.add('tv-video-ready');
+      v.style.setProperty('visibility', 'visible', 'important');
+      gate.style.setProperty('display', 'none', 'important');
+    };
+    ['loadeddata', 'canplay', 'playing', 'timeupdate', 'progress'].forEach(function (ev) {
+      v.addEventListener(ev, show);
+    });
+    show();
+  }
+
   function attachPlayVideo() {
     if (!PLAY) return;
     var dp = getPlayer();
     if (!dp || !dp.video) return;
     var v = dp.video;
+    ensureVideoGate(dp);
     if (v === hudVideo) return;
     hudVideo = v;
     v.addEventListener('timeupdate', function () {
@@ -2033,6 +2071,13 @@
       }
     });
     addEventListener('pagehide', function () { savePlayProgress(true); });
+
+    // <video> 创建时间不确定，前 15 秒每 500ms 检查一次，确保占位图一出现就被盖住
+    var gateTries = 0;
+    var gatePoll = setInterval(function () {
+      attachPlayVideo();
+      if (++gateTries >= 30) clearInterval(gatePoll);
+    }, 500);
 
     // 播放进度每 4 秒记录一次；换源/换集后重新绑定播放器事件
     setInterval(function () {
