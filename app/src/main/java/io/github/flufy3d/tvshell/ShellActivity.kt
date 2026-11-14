@@ -484,8 +484,10 @@ class ShellActivity : Activity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
             gravity = Gravity.CENTER
         }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = dp(16) })
+        val lastSearch = prefs().getString("last_search", "") ?: ""
         val input = EditText(this).apply {
-            hint = "输入片名、演员或关键词"
+            // 不预填上次的关键词：电视输入法不一定能替换选中文字，容易变成“旧词+新词”
+            hint = if (lastSearch.isBlank()) "输入片名、演员或关键词" else "上次：$lastSearch"
             setSingleLine(true)
             setTextColor(Color.WHITE)
             setHintTextColor(0x88FFFFFF.toInt())
@@ -496,9 +498,7 @@ class ShellActivity : Activity() {
             background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0xFF262633.toInt()) }
             isFocusable = true
             isFocusableInTouchMode = true
-            setText(prefs().getString("last_search", "") ?: "")
-            // 全选上次的关键词：直接输入就替换，按确定则照旧搜索
-            setSelection(0, text.length)
+            setText("")
         }
         panel.addView(input, LinearLayout.LayoutParams(dp(560), WRAP_CONTENT))
         input.setOnEditorActionListener { _, actionId, _ ->
@@ -557,6 +557,7 @@ class ShellActivity : Activity() {
                 "if(typeof f!=='function')return false;" +
                 "try{f(${JSONObject.quote(q)});return true}catch(e){return false}})()"
             web?.evaluateJavascript(script) { result ->
+                Log.i(TAG, "search handler result: $result")
                 if (result != "true") web?.loadUrl(searchUrl(q))
             }
         } else {
