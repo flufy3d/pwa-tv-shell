@@ -297,6 +297,10 @@
     'html.tv-playing .player-left iframe,html.tv-playing .MacPlayer{width:100vw!important;height:100vh!important;background:#000!important}',
     '#ADplayer,#ADtip,.vod-gg{display:none!important}',
 
+    // 播放器自带的低清 loading 图标（360buyimg 雪碧图）换成 CSS 转圈，任何分辨率都清晰
+    '#loading-box .pic{background:none!important;width:64px!important;height:64px!important;margin:-32px 0 0 -32px!important;border:5px solid rgba(255,255,255,.18)!important;border-top-color:#ff5a3c!important;border-radius:50%!important;position:absolute!important;left:50%!important;top:50%!important;transform:none!important;animation:tvshell-spin 1s linear infinite!important}',
+    '@keyframes tvshell-spin{to{transform:rotate(360deg)}}',
+
     // 播放页操作条：暂停时出现，方向键选择，确定执行
     '.tv-hud{display:none!important;position:fixed!important;left:0!important;right:0!important;bottom:0!important;z-index:99990!important;box-sizing:border-box!important;padding:70px 48px 28px!important;color:#fff!important;background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.84) 36%,#000 100%)!important;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif!important}',
     '.tv-hud.open{display:block!important}',
@@ -486,6 +490,11 @@
     id = String(id || '').replace(/[^\d]/g, '');
     sid = parseInt(sid, 10) || 1;
     nid = parseInt(nid, 10) || 1;
+    // 电影页是 /movie-play/<id>-<sid>，剧集才是 /movie-play/<id>-<sid>-<nid>
+    var pa;
+    try { pa = window.player_aaaa; } catch (e) {}
+    var m = pa && pa.link ? /^\/movie-play\/\d+-\d+(-\d+)?/.exec(String(pa.link)) : null;
+    if (m && !m[1]) return '/movie-play/' + id + '-' + sid;
     return '/movie-play/' + id + '-' + sid + '-' + nid;
   }
 
@@ -548,7 +557,7 @@
       sid: sid,
       nid: nid,
       ep: findEpisodeName(sid, nid),
-      href: playHref(pa.id, sid, nid),
+      href: pa.link || playHref(pa.id, sid, nid),
       detail: '/movie/' + pa.id
     };
     playInfoCache = { key: key, info: info };
@@ -1546,6 +1555,7 @@
     actions.appendChild(hudButton('prev', '上一集'));
     actions.appendChild(hudButton('next', '下一集'));
     actions.appendChild(hudButton('episodes', '选集'));
+    actions.appendChild(hudButton('line', '换线路'));
     actions.appendChild(hudButton('danmaku', '关闭弹幕'));
     actions.appendChild(hudButton('back', '返回'));
     hud.appendChild(actions);
@@ -1625,6 +1635,8 @@
     if (toggle) toggle.textContent = paused ? '播放' : '暂停';
     var dm = hud.querySelector('[data-act="danmaku"]');
     if (dm) dm.textContent = dmOff ? '开启弹幕' : '关闭弹幕';
+    var lineBtn = hud.querySelector('[data-act="line"]');
+    if (lineBtn) lineBtn.disabled = sourceSids().length < 2;
   }
 
   function updateHudProgress() {
@@ -1680,6 +1692,7 @@
     if (act === 'prev') { prevEpisode(); return; }
     if (act === 'next') { nextEpisode(); return; }
     if (act === 'episodes') { showEpisodes(); return; }
+    if (act === 'line') { switchLine(); return; }
     if (act === 'danmaku') { toggleDanmaku(); refreshHud(); return; }
     if (act === 'back') { hideHud(); backOut(); return; }
   }
@@ -1696,6 +1709,122 @@
       }
       showHud('toggle');
     } catch (e) { toast('播放器还没准备好'); }
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // 线路自动切换：某条线路 CDN 证书过期/超时时，自动试下一条
+  // ══════════════════════════════════════════════════════════════════
+  var LINE_KEY = 'csxyyTriedLines.v1';
+  var lineTimer = 0;
+  var lineSwitching = false;
+
+  function sourceSids() {
+    var out = [];
+    var els = document.querySelectorAll('.vod-playerUrl[data-play-sid]');
+    for (var i = 0; i < els.length; i++) {
+      var sid = parseInt(els[i].getAttribute('data-play-sid'), 10);
+      if (sid && out.indexOf(sid) < 0) out.push(sid);
+    }
+    if (!out.length) {
+      var pa;
+      try { pa = window.player_aaaa; } catch (e) {}
+      if (pa && pa.sid) out.push(parseInt(pa.sid, 10) || 1);
+    }
+    return out;
+  }
+
+  function videoLooksPlaying(dp) {
+    if (!dp || !dp.video) return false;
+    var v = dp.video;
+    try {
+      if (v.readyState >= 2) return true;
+      if (v.currentTime > 0.5) return true;
+      if (v.buffered && v.buffered.length && v.buffered.end(v.buffered.length - 1) > 0.5) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  function readTriedLines() {
+    try { return JSON.parse(sessionStorage.getItem(LINE_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function writeTriedLines(o) {
+    try { sessionStorage.setItem(LINE_KEY, JSON.stringify(o)); } catch (e) {}
+  }
+
+  function clearTriedLine() {
+    var pa;
+    try { pa = window.player_aaaa; } catch (e) {}
+    if (!pa || !pa.id) return;
+    var all = readTriedLines();
+    delete all[String(pa.id)];
+    writeTriedLines(all);
+  }
+
+  function switchLine(sid) {
+    var pa;
+    try { pa = window.player_aaaa; } catch (e) {}
+    if (!pa || !pa.id) { toast('当前页面没有播放器'); return; }
+    if (!sid) {
+      var sids = sourceSids();
+      var cur = parseInt(pa.sid, 10) || 1;
+      var idx = sids.indexOf(cur);
+      if (sids.length < 2 || idx < 0) { toast('没有其他线路'); return; }
+      sid = sids[(idx + 1) % sids.length];
+    }
+    hideHud();
+    lineSwitching = true;
+    toast('正在切换到线路 ' + sid);
+    var href = playHref(pa.id, sid, pa.nid);
+    setTimeout(function () {
+      try { location.href = href; } catch (e) {}
+    }, 300);
+  }
+
+  function tryNextLine() {
+    if (!PLAY || lineSwitching) return;
+    if (videoLooksPlaying(getPlayer())) { clearTriedLine(); return; }
+    if (userPaused) return;
+    var pa;
+    try { pa = window.player_aaaa; } catch (e) {}
+    if (!pa || !pa.id) return;
+    var sids = sourceSids();
+    if (sids.length < 2) return;
+    var id = String(pa.id);
+    var all = readTriedLines();
+    var tried = all[id] || [];
+    var cur = parseInt(pa.sid, 10) || 1;
+    if (tried.indexOf(cur) < 0) tried.push(cur);
+    var next = 0;
+    for (var i = 1; i <= sids.length; i++) {
+      var sid = sids[(sids.indexOf(cur) + i) % sids.length];
+      if (sid && tried.indexOf(sid) < 0) { next = sid; break; }
+    }
+    if (!next) {
+      all[id] = tried;
+      writeTriedLines(all);
+      // 最后一条线路也可能只是慢，给它更长的缓冲再下结论
+      setTimeout(function () {
+        if (videoLooksPlaying(getPlayer())) { clearTriedLine(); return; }
+        toast('所有线路都无法播放');
+      }, 20000);
+      return;
+    }
+    tried.push(next);
+    all[id] = tried;
+    writeTriedLines(all);
+    toast('线路 ' + cur + ' 播放失败，切换到线路 ' + next);
+    switchLine(next);
+  }
+
+  function scheduleLineCheck() {
+    if (!PLAY) return;
+    clearTimeout(lineTimer);
+    lineTimer = setTimeout(function () {
+      if (lineSwitching) return;
+      if (videoLooksPlaying(getPlayer())) { clearTriedLine(); return; }
+      // 再给 3 秒缓冲，避免慢源刚起播就被切走
+      lineTimer = setTimeout(tryNextLine, 3000);
+    }, 6000);
   }
 
   function attachPlayVideo() {
@@ -1833,8 +1962,25 @@
     toggleDanmaku();
   }, true);
 
+  // 旧记录/旧链接可能把电影存成 /movie-play/<id>-<sid>-1，站点电影页只认两段，自动纠正一次
+  function fixMoviePlayUrl() {
+    if (!PLAY) return;
+    var pa;
+    try { pa = window.player_aaaa; } catch (e) {}
+    if (pa && pa.id) return;
+    var m = /^\/movie-play\/(\d+)-(\d+)-(\d+)$/.exec(location.pathname);
+    if (!m) return;
+    var key = 'csxyyFixUrl.' + m[1] + '-' + m[2];
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+    } catch (e) {}
+    try { location.replace('/movie-play/' + m[1] + '-' + m[2]); } catch (e) {}
+  }
+
   // 首屏、懒加载和 Swiper 初始化后都清理一遍
   function boot() {
+    fixMoviePlayUrl();
     tidyTop();
     scheduleNuke();
     setTimeout(tidyTop, 120);
@@ -1844,6 +1990,7 @@
       buildHud();
       attachPlayVideo();
       tryResume();
+      scheduleLineCheck();
     }
     // 原生搜索的兜底路径：/?tvsearch=关键词。正常情况下走 csxyySearch，不会刷新页面
     if (TOP && !searchOpen) {
