@@ -272,8 +272,9 @@
     '.tv-btn-primary{background:linear-gradient(135deg,#ff5a3c,#ff8a3c)!important;color:#190a06!important}',
     '.tv-btn-primary:hover{background:linear-gradient(135deg,#ff6b4f,#ffa04f)!important}',
     '.tv-btn-danger{background:rgba(255,90,60,.22)!important;color:#ffd0c6!important;box-shadow:inset 0 0 0 1px rgba(255,120,90,.5)!important}',
-    '.tv-hist-grid{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))!important;gap:18px!important;align-content:start!important;flex:1 1 auto!important;min-height:0!important;width:100%!important;max-width:1600px!important;margin:24px auto 0!important;padding:8px 6px 26px!important;overflow-y:auto!important;box-sizing:border-box!important;scroll-padding:20px!important}',
-    '.tv-hist-grid .tv-card{width:100%!important;height:auto!important;aspect-ratio:16/9!important}',
+    // 用 flex 而不是 grid：部分电视 WebView 会把 grid 行高算成文字高度，卡片会叠在一起
+    '.tv-hist-grid{display:flex!important;flex-wrap:wrap!important;gap:18px!important;align-content:flex-start!important;flex:1 1 auto!important;min-height:0!important;width:100%!important;max-width:1600px!important;margin:24px auto 0!important;padding:8px 6px 26px!important;overflow-y:auto!important;box-sizing:border-box!important;scroll-padding:20px!important}',
+    '.tv-hist-grid .tv-card{flex:1 1 250px!important;max-width:calc((100% - 36px)/3)!important;width:auto!important;height:auto!important;aspect-ratio:16/9!important}',
     '.tv-hist.is-empty .tv-hist-grid{display:none!important}',
     '.tv-hist.is-empty .tv-hist-actions [data-act="clear"]{display:none!important}',
     '.tv-hist-empty{display:none!important;flex:1 1 auto!important;align-items:center!important;justify-content:center!important;flex-direction:column!important;gap:12px!important;text-align:center!important;padding-bottom:60px!important}',
@@ -286,7 +287,6 @@
     // ── 搜索结果面板（站内 /search 被 Cloudflare 拦住，改用联想接口本地渲染）──
     '.tv-search-res .tv-hist-title{min-width:0!important;max-width:calc(100% - 300px)!important}',
     '.tv-search-res .tv-hist h2{white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}',
-    '.tv-search-res .tv-hist-grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))!important}',
     '.tv-search-res .tv-card-meta{color:rgba(255,255,255,.62)!important}',
 
     // ── 播放页 ──
@@ -371,7 +371,6 @@
     'html body .tv-search-head{width:calc(100% - 40px)!important}',
     '#csxyy-tv-continue .tv-shelf-row{gap:14px!important}',
     '#csxyy-tv-continue .tv-card{flex:0 0 215px!important;width:215px!important;height:121px!important}',
-    '.tv-hist-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))!important}',
     'html body .vod-rank-box{width:50%!important}',
     'html body .tv-hist{padding:26px 28px 0!important}',
     'html body .tv-hud{padding:54px 28px 22px!important}',
