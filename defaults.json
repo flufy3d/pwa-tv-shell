@@ -17,6 +17,10 @@
     "keys": ["MENU", "TV_CONTENTS_MENU"],
     "items": []
   },
+  "search": {
+    "url": "/search?wd={q}",
+    "handler": null
+  },
   "aliases": {
     "BUTTON_A": "DPAD_CENTER",
     "BUTTON_B": "BACK",

@@ -247,6 +247,7 @@ $runtime = [ordered]@{
     backgroundColor = $bg
     back            = $cfg.back
     menu            = $cfg.menu
+    search          = $cfg.search
     aliases         = $cfg.aliases
     input           = $cfg.input
     keys            = $cfg.keys

@@ -29,6 +29,10 @@
     "PROG_GREEN": "F2",
     "SEARCH": "F3"
   },
+  "search": {
+    "handler": "csxyySearch",
+    "url": "/?tvsearch={q}"
+  },
   "inject": {
     "scripts": ["csxyy.tv.js"]
   }

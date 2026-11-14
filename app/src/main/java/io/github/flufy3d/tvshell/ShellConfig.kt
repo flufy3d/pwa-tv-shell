@@ -77,6 +77,15 @@ class ShellConfig(private val j: JSONObject) {
     val inputModes: List<String> = (input.optJSONArray("modes")?.strings() ?: listOf("focus", "cursor"))
         .onEach { checkMode(it, "input.modes") }.ifEmpty { listOf(inputMode) }
 
+    /**
+     * 原生搜索框提交后去哪里。默认跳到站内搜索页；handler 存在时优先调用网页里的同名函数，
+     * 由网页自己渲染结果（站点搜索页被 WAF 拦截时用）。url 里的 {q} 会替换成 URL 编码后的关键词。
+     */
+    private val search: JSONObject = j.optJSONObject("search") ?: JSONObject()
+    val searchHandler: String? = search.optString("handler").trim().takeIf { it.isNotEmpty() && it != "null" }
+    val searchUrl: String = search.optString("url", "/search?wd={q}").trim()
+        .takeIf { it.isNotEmpty() && it != "null" } ?: "/search?wd={q}"
+
     /** 遥控器键 → 网页键盘事件。返回键只按 back 策略处理，不能映射。 */
     val keys: Map<Int, WebKey> = buildMap {
         val o = j.optJSONObject("keys") ?: JSONObject()

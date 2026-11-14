@@ -71,6 +71,20 @@
     }
   }
 
+  // 站内 /search 被 Cloudflare 上了人机验证，拦下所有站内搜索链接和表单，交给本地结果面板。
+  function searchQueryOf(a) {
+    var u = urlOf(a);
+    if (!u) return '';
+    var p = u.pathname || '';
+    var q = '';
+    if (p.indexOf('/search/wd/') === 0) q = p.slice('/search/wd/'.length);
+    else if (p.indexOf('/search/actor/') === 0) q = p.slice('/search/actor/'.length);
+    else if (p === '/search' || p === '/search/') q = u.searchParams ? (u.searchParams.get('wd') || '') : '';
+    if (!q) return '';
+    try { q = decodeURIComponent(q.replace(/\+/g, ' ')); } catch (e) {}
+    return q.replace(/\s+/g, ' ').trim();
+  }
+
   // 外链一律不跳转（本站内容链接都在 csxyy.com）。原生侧还有 blockExternal 兜底。
   document.addEventListener('click', function (e) {
     var t = e.target;
@@ -78,10 +92,38 @@
     if (!a) return;
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#' || /^javascript:/i.test(href)) return;
-    if (!isHttpUrl(a) || isSiteUrl(a)) return;
+    if (!isHttpUrl(a)) return;
+    if (isSiteUrl(a)) {
+      if (!TOP) return;
+      var u = urlOf(a);
+      var p = u ? (u.pathname || '') : '';
+      var isSearch = p === '/search' || p === '/search/' || p.indexOf('/search/') === 0;
+      var q = searchQueryOf(a);
+      if (!q && !isSearch) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (q) openSearchResults(q);
+      else openSearch();
+      return;
+    }
     e.preventDefault();
     e.stopImmediatePropagation();
     if (TOP && window.TVShell && TVShell.toast) TVShell.toast('已拦截外部链接');
+  }, true);
+
+  document.addEventListener('submit', function (e) {
+    if (!TOP) return;
+    var f = e.target;
+    if (!f || !f.getAttribute) return;
+    var action = f.getAttribute('action') || '';
+    if (action !== '/search' && action !== '/search/' && action.indexOf('/search/') !== 0) return;
+    var input = f.querySelector('input[name=wd]');
+    if (!input) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    var q = (input.value || '').replace(/\s+/g, ' ').trim();
+    if (q) openSearchResults(q);
+    else openSearch();
   }, true);
 
   // 广告常用 window.open；多个窗口在套壳里本来也打不开。
@@ -240,6 +282,12 @@
     '.tv-hist-empty h3{font-size:24px!important;margin:0!important;color:#fff!important;font-weight:800!important}',
     '.tv-hist-empty p{font-size:14px!important;color:var(--tv-muted)!important;margin:0 0 10px!important;line-height:1.5!important}',
     '.tv-hist-foot{flex:0 0 auto!important;width:100%!important;max-width:1600px!important;margin:0 auto!important;padding:12px 6px 16px!important;border-top:1px solid rgba(255,255,255,.06)!important;font-size:12px!important;color:#6f7a8d!important;text-align:right!important}',
+
+    // ── 搜索结果面板（站内 /search 被 Cloudflare 拦住，改用联想接口本地渲染）──
+    '.tv-search-res .tv-hist-title{min-width:0!important;max-width:calc(100% - 300px)!important}',
+    '.tv-search-res .tv-hist h2{white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}',
+    '.tv-search-res .tv-hist-grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))!important}',
+    '.tv-search-res .tv-card-meta{color:rgba(255,255,255,.62)!important}',
 
     // ── 播放页 ──
     'html.tv-playing,html.tv-playing body{overflow:hidden!important;background:#000!important;padding:0!important;margin:0!important}',
@@ -838,6 +886,7 @@
   }
 
   function openHistory() {
+    if (searchOpen) closeSearchResults();
     buildOverlay();
     if (!overlayOpen) overlayLastFocus = document.activeElement;
     var dp = getPlayer();
@@ -864,7 +913,7 @@
     if (!overlayOpen || !overlay) return;
     overlayOpen = false;
     overlay.classList.remove('open');
-    document.documentElement.classList.remove('tv-overlay-open');
+    if (!searchOpen) document.documentElement.classList.remove('tv-overlay-open');
     resetClear();
     if (overlayLastFocus && overlayLastFocus.isConnected) safeFocus(overlayLastFocus);
     overlayLastFocus = null;
@@ -890,6 +939,204 @@
     setTimeout(function () {
       if (overlayOpen && overlay) safeFocus(overlay.querySelector('[data-act="close"]'));
     }, 40);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // 搜索结果面板
+  // 站内 /search 现在会被 Cloudflare 弹“请验证您是真人”，
+  // 改用站点的联想接口 /index.php/ajax/suggest/ 在本地渲染结果。
+  // ══════════════════════════════════════════════════════════════════
+  var searchOverlay = null;
+  var searchOpen = false;
+  var searchToken = 0;
+  var searchLastFocus = null;
+  var searchWasPlaying = false;
+
+  function searchById(id) {
+    return String(id || '').replace(/[^\d]/g, '');
+  }
+
+  function makeSearchCard(item) {
+    var a = el('a', 'tv-card');
+    a.href = '/movie/' + searchById(item.id);
+    a.title = item.name || '';
+    if (!item.pic) a.classList.add('tv-card-noposter');
+    if (item.pic) {
+      var img = document.createElement('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.src = item.pic;
+      img.addEventListener('error', function () {
+        a.classList.add('tv-card-noposter');
+        if (img.parentNode) img.parentNode.removeChild(img);
+      });
+      a.appendChild(img);
+    }
+    a.appendChild(el('span', 'tv-card-play'));
+    var info = el('div', 'tv-card-info');
+    info.appendChild(el('strong', 'tv-card-title', item.name || ''));
+    info.appendChild(el('span', 'tv-card-meta', item.en ? item.en : '确定键查看详情'));
+    a.appendChild(info);
+    return a;
+  }
+
+  function buildSearchOverlay() {
+    if (searchOverlay) return searchOverlay;
+    var o = el('div', 'tv-hist tv-search-res');
+    o.setAttribute('role', 'dialog');
+    o.setAttribute('aria-modal', 'true');
+    o.setAttribute('aria-label', '搜索结果');
+
+    var top = el('div', 'tv-hist-top');
+    var title = el('div', 'tv-hist-title');
+    title.appendChild(el('span', 'tv-eyebrow', '搜索'));
+    var h2 = el('h2', '', '搜索');
+    title.appendChild(h2);
+    var sub = el('p', 'tv-hist-sub', '');
+    title.appendChild(sub);
+    top.appendChild(title);
+
+    var actions = el('div', 'tv-hist-actions');
+    var again = el('button', 'tv-btn tv-btn-primary', '重新搜索');
+    again.type = 'button';
+    again.setAttribute('data-act', 'again');
+    var close = el('button', 'tv-btn', '关闭');
+    close.type = 'button';
+    close.setAttribute('data-act', 'close');
+    actions.appendChild(again);
+    actions.appendChild(close);
+    top.appendChild(actions);
+    o.appendChild(top);
+
+    var grid = el('div', 'tv-hist-grid');
+    o.appendChild(grid);
+
+    var empty = el('div', 'tv-hist-empty');
+    empty.appendChild(el('div', 'tv-empty-ico', '搜'));
+    var eh3 = el('h3', '', '没有找到相关影片');
+    var ep = el('p', '', '换个关键词试试，比如片名的一部分');
+    empty.appendChild(eh3);
+    empty.appendChild(ep);
+    o.appendChild(empty);
+
+    o.appendChild(el('div', 'tv-hist-foot', '方向键浏览 · 确定键打开详情 · 返回键关闭'));
+
+    o.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('button[data-act]') : null;
+      if (!b) return;
+      if (b.getAttribute('data-act') === 'again') {
+        closeSearchResults();
+        openSearch();
+      } else if (b.getAttribute('data-act') === 'close') {
+        closeSearchResults();
+      }
+    });
+    document.body.appendChild(o);
+    searchOverlay = o;
+    return o;
+  }
+
+  function setSearchEmpty(o, heading, text) {
+    o.classList.add('is-empty');
+    var h = o.querySelector('.tv-hist-empty h3');
+    var p = o.querySelector('.tv-hist-empty p');
+    if (h) h.textContent = heading;
+    if (p) p.textContent = text;
+  }
+
+  function openSearchResults(q) {
+    q = String(q || '').replace(/\s+/g, ' ').trim();
+    if (!q) { openSearch(); return; }
+    if (!TOP) return;
+
+    // 从兜底地址 /?tvsearch=... 进来时，把参数从地址栏去掉，刷新不会再次弹出
+    try {
+      if (/[?&]tvsearch=/.test(location.search)) {
+        history.replaceState(null, '', location.pathname + location.hash);
+      }
+    } catch (e) {}
+
+    if (overlayOpen) closeHistory();
+    var o = buildSearchOverlay();
+    var h2 = o.querySelector('.tv-hist-top h2');
+    var sub = o.querySelector('.tv-hist-sub');
+    var grid = o.querySelector('.tv-hist-grid');
+    h2.textContent = '“' + q + '”';
+    sub.textContent = '正在搜索…';
+    grid.textContent = '';
+    grid.scrollTop = 0;
+    o.classList.remove('is-empty');
+
+    hideHud();
+    var dp = getPlayer();
+    searchWasPlaying = !!(dp && dp.video && !dp.video.paused);
+    if (searchWasPlaying) {
+      userPaused = true;
+      try { dp.pause(); } catch (e) {}
+    }
+
+    if (!searchOpen) searchLastFocus = document.activeElement;
+    document.documentElement.classList.add('tv-overlay-open');
+    o.classList.add('open');
+    searchOpen = true;
+    var token = ++searchToken;
+    safeFocus(o.querySelector('[data-act="close"]'));
+
+    fetch('/index.php/ajax/suggest/?mid=1&wd=' + encodeURIComponent(q), {
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (token !== searchToken || !searchOpen) return;
+        var list = (data && data.list) || [];
+        var items = [];
+        for (var i = 0; i < list.length; i++) {
+          var x = list[i];
+          if (x && x.id && x.name) items.push(x);
+        }
+        var total = parseInt(data && data.total, 10) || items.length;
+        if (!items.length) {
+          sub.textContent = '没有找到影片';
+          setSearchEmpty(o, '没有找到“' + q + '”', '换个关键词试试，比如片名的一部分');
+          setTimeout(function () {
+            if (searchOpen && token === searchToken) safeFocus(o.querySelector('[data-act="again"]'));
+          }, 60);
+          return;
+        }
+        sub.textContent = '共 ' + total + ' 个结果 · 确定键打开详情';
+        for (var j = 0; j < items.length; j++) grid.appendChild(makeSearchCard(items[j]));
+        setTimeout(function () {
+          if (searchOpen && token === searchToken) safeFocus(grid.querySelector('.tv-card'));
+        }, 60);
+      })
+      .catch(function () {
+        if (token !== searchToken || !searchOpen) return;
+        sub.textContent = '搜索失败';
+        setSearchEmpty(o, '搜索失败', '网络或站点暂时不可用，按“重新搜索”再试一次');
+        setTimeout(function () {
+          if (searchOpen && token === searchToken) safeFocus(o.querySelector('[data-act="again"]'));
+        }, 60);
+      });
+  }
+
+  function closeSearchResults() {
+    if (!searchOpen || !searchOverlay) return;
+    searchOpen = false;
+    searchToken++;
+    searchOverlay.classList.remove('open');
+    if (!overlayOpen) document.documentElement.classList.remove('tv-overlay-open');
+    if (searchLastFocus && searchLastFocus.isConnected) safeFocus(searchLastFocus);
+    searchLastFocus = null;
+    if (searchWasPlaying) {
+      searchWasPlaying = false;
+      userPaused = false;
+      var dp = getPlayer();
+      if (dp) { try { dp.play(); } catch (e) {} }
+    }
   }
 
   // ── 详情页“继续观看” ──
@@ -1492,6 +1739,11 @@
 
   // 返回键：先关面板/操作条，再交给套壳处理
   window.addEventListener('tvshell:back', function (e) {
+    if (searchOpen) {
+      e.preventDefault();
+      closeSearchResults();
+      return;
+    }
     if (overlayOpen) {
       e.preventDefault();
       closeHistory();
@@ -1506,6 +1758,12 @@
   // 兼容少数把返回键发成 Escape 的遥控器
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
+    if (searchOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSearchResults();
+      return;
+    }
     if (overlayOpen) {
       e.preventDefault();
       e.stopPropagation();
@@ -1519,6 +1777,9 @@
     }
   }, true);
 
+  // 原生搜索框提交后调用这个函数（apps/csxyy.json 的 search.handler）
+  try { window.csxyySearch = openSearchResults; } catch (e) {}
+
   Object.defineProperty(window, 'csxyyTV', {
     configurable: true,
     value: Object.freeze({
@@ -1531,6 +1792,7 @@
       toggleDanmaku: toggleDanmaku,
       openHistory: openHistory,
       closeHistory: closeHistory,
+      search: openSearchResults,
       openHud: showHud,
       closeHud: hideHud,
       history: readHistory
@@ -1583,6 +1845,15 @@
       buildHud();
       attachPlayVideo();
       tryResume();
+    }
+    // 原生搜索的兜底路径：/?tvsearch=关键词。正常情况下走 csxyySearch，不会刷新页面
+    if (TOP && !searchOpen) {
+      var sm = /[?&]tvsearch=([^&]*)/.exec(location.search);
+      if (sm) {
+        var sq = '';
+        try { sq = decodeURIComponent(sm[1].replace(/\+/g, ' ')); } catch (e) { sq = sm[1]; }
+        if (sq) setTimeout(function () { openSearchResults(sq); }, 0);
+      }
     }
   }
 

@@ -497,7 +497,8 @@ class ShellActivity : Activity() {
             isFocusable = true
             isFocusableInTouchMode = true
             setText(prefs().getString("last_search", "") ?: "")
-            setSelection(text.length)
+            // 全选上次的关键词：直接输入就替换，按确定则照旧搜索
+            setSelection(0, text.length)
         }
         panel.addView(input, LinearLayout.LayoutParams(dp(560), WRAP_CONTENT))
         input.setOnEditorActionListener { _, actionId, _ ->
@@ -546,11 +547,27 @@ class ShellActivity : Activity() {
             showHint("请输入关键词")
             return
         }
-        val url = ShellConfig.originOf(cfg.url) + "/search?wd=" + Uri.encode(q)
-        Log.i(TAG, "search: $q -> $url")
+        Log.i(TAG, "search: $q")
         prefs().edit().putString("last_search", q).apply()
         closeSearch()
-        web?.loadUrl(url)
+        // handler 由网页自己接管搜索（比如站点搜索页被 WAF 拦截，改用站点的联想接口渲染）
+        val handler = cfg.searchHandler
+        if (handler != null) {
+            val script = "(function(){var f=window[${JSONObject.quote(handler)}];" +
+                "if(typeof f!=='function')return false;" +
+                "try{f(${JSONObject.quote(q)});return true}catch(e){return false}})()"
+            web?.evaluateJavascript(script) { result ->
+                if (result != "true") web?.loadUrl(searchUrl(q))
+            }
+        } else {
+            web?.loadUrl(searchUrl(q))
+        }
+    }
+
+    private fun searchUrl(q: String): String {
+        val path = cfg.searchUrl.replace("{q}", Uri.encode(q))
+        if (path.startsWith("http://") || path.startsWith("https://")) return path
+        return ShellConfig.originOf(cfg.url) + (if (path.startsWith("/")) path else "/$path")
     }
 
     /**
